@@ -90,6 +90,11 @@ export interface ForecastData {
   confidence: number
   trend: 'rising' | 'declining' | 'stable'
   predictions: ForecastPrediction[]
+  keyPredictions?: {
+    volatilityChange: string
+    solarActivity: string
+    riskWindow: string
+  }
 }
 
 // API Client Configuration Types

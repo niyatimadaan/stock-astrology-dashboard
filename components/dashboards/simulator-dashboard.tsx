@@ -1,33 +1,47 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts"
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Legend, ResponsiveContainer } from "recharts"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Slider } from "@/components/ui/slider"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Loader2 } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Loader2, Info } from "lucide-react"
 import { getSimulatorData } from "@/lib/actions/simulator"
-import type { SimulatorData } from "@/lib/actions/simulator"
+import type { SimulatorData, ScenarioType } from "@/lib/actions/simulator"
 
 export default function SimulatorDashboard() {
   const [flareIntensity, setFlareIntensity] = useState(5)
-  const [predictedVolatility, setPredictedVolatility] = useState(6.2)
   const [data, setData] = useState<SimulatorData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [simulation, setSimulation] = useState<any>(null)
+  const [currentScenario, setCurrentScenario] = useState<ScenarioType>('baseline')
 
   useEffect(() => {
     fetchSimulatorDataFromServer()
   }, [])
 
   useEffect(() => {
-    runSimulation()
+    // Determine scenario based on flare intensity and fetch new data
+    const scenario = determineScenario(flareIntensity)
+    if (scenario !== currentScenario) {
+      setCurrentScenario(scenario)
+      fetchSimulatorDataFromServer(scenario)
+    }
   }, [flareIntensity])
 
-  const fetchSimulatorDataFromServer = async () => {
+  const determineScenario = (intensity: number): ScenarioType => {
+    if (intensity >= 8) return 'extreme_event'
+    if (intensity >= 5) return 'high_solar'
+    if (intensity <= 2) return 'low_solar'
+    return 'baseline'
+  }
+
+  const fetchSimulatorDataFromServer = async (scenario: ScenarioType = 'baseline') => {
     try {
-      const result = await getSimulatorData({ scenario: 'baseline' })
+      setLoading(true)
+      const result = await getSimulatorData({ scenario, days: 14 })
+      console.log("Fetched simulator data:", result)
       setData(result)
     } catch (err) {
       console.error("Error fetching simulator:", err)
@@ -52,40 +66,17 @@ export default function SimulatorDashboard() {
     })
   }
 
-  const runSimulation = () => {
-    if (!data) return
+  // Calculate predicted volatility from actual data
+  const predictedVolatility = data?.summary.avgVolatility || 0
+  const baselineVolatility = 2.0 // Historical baseline
+  const percentageChange = ((predictedVolatility - baselineVolatility) / baselineVolatility * 100).toFixed(1)
 
-    // Simple linear regression model (using 1.85 slope and 0.5 intercept as baseline)
-    const slope = 1.85
-    const intercept = 0.5
-    const predictedVol = slope * flareIntensity + intercept
-    setPredictedVolatility(predictedVol)
-
-    // Generate forecast line with historical + prediction
-    const historicalData = [
-      { flare: 1, volatility: 2.1 },
-      { flare: 2, volatility: 3.8 },
-      { flare: 3, volatility: 5.2 },
-      { flare: 4, volatility: 7.1 },
-      { flare: 5, volatility: 9.2 },
-      { flare: 6, volatility: 11.5 },
-    ]
-
-    const forecast = [
-      ...historicalData,
-      {
-        flare: flareIntensity,
-        volatility: predictedVol,
-        type: "prediction",
-      },
-    ]
-
-    setSimulation({
-      forecastData: forecast,
-      impact: predictedVol - intercept,
-      confidence: 0.75 + Math.random() * 0.15,
-    })
-  }
+  // Transform simulator data for chart
+  const chartData = data?.simulatedData.map(d => ({
+    date: d.date.substring(5), // MM-DD format
+    flare: d.flare,
+    volatility: d.volatility,
+  })) || []
 
   if (loading) {
     return (
@@ -95,91 +86,143 @@ export default function SimulatorDashboard() {
     )
   }
 
-  const baselineIntercept = 0.5
-  const percentageChange = ((predictedVolatility / baselineIntercept) * 100).toFixed(1)
+  const riskLevelColors = {
+    low: 'bg-green-500/20 text-green-700 border-green-500/30',
+    medium: 'bg-yellow-500/20 text-yellow-700 border-yellow-500/30',
+    high: 'bg-orange-500/20 text-orange-700 border-orange-500/30',
+    extreme: 'bg-red-500/20 text-red-700 border-red-500/30',
+  }
 
   return (
     <div className="p-6 space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="border-l-4 border-l-primary md:col-span-2">
-          <CardHeader>
-            <CardTitle>Scenario Setup</CardTitle>
-            <CardDescription>Adjust flare intensity to simulate market impact</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <div className="flex justify-between mb-2">
-                <label className="text-sm font-medium">Solar Flare Intensity</label>
-                <Badge variant="outline" className="text-base py-1 px-3">
-                  X{flareIntensity.toFixed(1)}
-                </Badge>
+      <TooltipProvider>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card className="border-l-4 border-l-primary md:col-span-2">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                Scenario Setup
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="w-4 h-4 cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="max-w-xs">Adjust solar flare intensity to simulate different scenarios: Low Solar (0.5-2), Baseline (2-5), High Solar (5-8), Extreme Event (8-10)</p>
+                  </TooltipContent>
+                </Tooltip>
+              </CardTitle>
+              <CardDescription>Current: {data?.scenario.replace('_', ' ').toUpperCase()} scenario</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <div className="flex justify-between mb-2">
+                  <label className="text-sm font-medium">Solar Flare Intensity</label>
+                  <Badge variant="outline" className="text-base py-1 px-3">
+                    X{flareIntensity.toFixed(1)}
+                  </Badge>
+                </div>
+                <Slider
+                  value={[flareIntensity]}
+                  onValueChange={(value) => setFlareIntensity(value[0])}
+                  min={0.5}
+                  max={10}
+                  step={0.5}
+                />
+                <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                  <span>Minor (0.5)</span>
+                  <span>Extreme (10)</span>
+                </div>
               </div>
-              <Slider
-                value={[flareIntensity]}
-                onValueChange={(value) => setFlareIntensity(value[0])}
-                min={0.5}
-                max={10}
-                step={0.5}
-              />
-              <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                <span>Minor</span>
-                <span>Extreme</span>
+              <div className="p-3 bg-muted rounded-lg">
+                <p className="text-xs font-semibold mb-1">Active Scenario</p>
+                <p className="text-sm">{data?.description}</p>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        <Card className="border-l-4 border-l-accent">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Predicted Volatility</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">{predictedVolatility.toFixed(1)}%</p>
-            <Badge className="mt-3 bg-accent/20 text-accent border-accent/30">Estimated</Badge>
-          </CardContent>
-        </Card>
+          <Card className="border-l-4 border-l-accent">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                Predicted Volatility
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="w-3 h-3 cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="max-w-xs">Average predicted market volatility percentage for the selected scenario over 14 days</p>
+                  </TooltipContent>
+                </Tooltip>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold">{predictedVolatility.toFixed(1)}%</p>
+              <Badge className="mt-3 bg-accent/20 text-accent border-accent/30">Estimated</Badge>
+            </CardContent>
+          </Card>
 
-        <Card className="border-l-4 border-l-secondary">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Volatility Change</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold text-green-600">+{percentageChange}%</p>
-            <Badge className="mt-3 bg-secondary/20 text-secondary border-secondary/30">Impact</Badge>
-          </CardContent>
-        </Card>
-      </div>
+          <Card className="border-l-4 border-l-secondary">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                Risk Level
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="w-3 h-3 cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="max-w-xs">Overall market risk assessment based on predicted solar activity and volatility levels</p>
+                  </TooltipContent>
+                </Tooltip>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold capitalize">{data?.summary.riskLevel}</p>
+              <Badge className={`mt-3 ${riskLevelColors[data?.summary.riskLevel || 'medium']}`}>
+                {percentageChange > '0' ? '+' : ''}{percentageChange}% vs baseline
+              </Badge>
+            </CardContent>
+          </Card>
+        </div>
+      </TooltipProvider>
 
       <Card>
         <CardHeader>
-          <CardTitle>Regression Model Forecast</CardTitle>
+          <CardTitle>Simulated Activity Forecast</CardTitle>
           <CardDescription>
-            If an X{flareIntensity.toFixed(1)} flare happens → volatility likely increases
+            14-day projection for {data?.scenario.replace('_', ' ')} scenario
           </CardDescription>
         </CardHeader>
         <CardContent className="h-96">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={simulation?.forecastData || []}>
+            <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
               <XAxis
-                dataKey="flare"
-                label={{ value: "Flare Intensity", position: "insideBottomRight", offset: -5 }}
+                dataKey="date"
                 stroke="var(--color-muted-foreground)"
               />
               <YAxis
-                label={{ value: "Volatility %", angle: -90, position: "insideLeft" }}
+                yAxisId="left"
                 stroke="var(--color-muted-foreground)"
               />
-              <Tooltip
-                contentStyle={{ backgroundColor: "var(--color-card)", border: "1px solid var(--color-border)" }}
+              <YAxis
+                yAxisId="right"
+                orientation="right"
+                stroke="var(--color-muted-foreground)"
               />
               <Legend />
               <Line
                 type="monotone"
-                dataKey="volatility"
+                dataKey="flare"
                 stroke="var(--color-primary)"
                 strokeWidth={2}
-                name="Volatility"
+                name="Flare Intensity"
+                yAxisId="left"
+              />
+              <Line
+                type="monotone"
+                dataKey="volatility"
+                stroke="var(--color-accent)"
+                strokeWidth={2}
+                name="Volatility %"
+                yAxisId="right"
               />
             </LineChart>
           </ResponsiveContainer>
@@ -190,24 +233,25 @@ export default function SimulatorDashboard() {
         <Card>
           <CardHeader>
             <CardTitle>Simulation Results</CardTitle>
+            <CardDescription>Key metrics for {data?.scenario.replace('_', ' ')} scenario</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="p-4 bg-primary/5 rounded border border-primary/20">
-              <p className="text-xs font-semibold text-primary mb-1">Base Case</p>
+              <p className="text-xs font-semibold text-primary mb-1">Average Flare Intensity</p>
               <p className="text-sm">
-                No additional flare activity → Volatility remains at ~{baselineIntercept.toFixed(1)}%
+                X{data?.summary.avgFlare.toFixed(2)} over 14-day simulation period
               </p>
             </div>
             <div className="p-4 bg-accent/5 rounded border border-accent/20">
-              <p className="text-xs font-semibold text-accent mb-1">Scenario Case</p>
+              <p className="text-xs font-semibold text-accent mb-1">Average Volatility</p>
               <p className="text-sm">
-                X{flareIntensity.toFixed(1)} flare event → Volatility increases to {predictedVolatility.toFixed(1)}%
+                {data?.summary.avgVolatility.toFixed(2)}% market volatility expected
               </p>
             </div>
             <div className="p-4 bg-secondary/5 rounded border border-secondary/20">
-              <p className="text-xs font-semibold text-secondary mb-1">Impact Range</p>
+              <p className="text-xs font-semibold text-secondary mb-1">Total Trading Volume</p>
               <p className="text-sm">
-                Expected impact: +{percentageChange}% (±{(simulation?.confidence * 100 || 75).toFixed(0)}% confidence)
+                {((data?.summary.totalVolume || 0) / 1000000).toFixed(1)}M shares across simulation period
               </p>
             </div>
           </CardContent>
@@ -215,29 +259,26 @@ export default function SimulatorDashboard() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Trading Implications</CardTitle>
+            <CardTitle>Model Assumptions</CardTitle>
+            <CardDescription>Scenario parameters and constraints</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="p-4 bg-blue-500/5 rounded border border-blue-500/20">
-              <p className="font-semibold text-sm mb-2">📈 Strategy</p>
-              <p className="text-sm text-muted-foreground">
-                Long volatility strategies (VIX calls, straddles) may outperform
-              </p>
-            </div>
-            <div className="p-4 bg-orange-500/5 rounded border border-orange-500/20">
-              <p className="font-semibold text-sm mb-2">⚠️ Risk Management</p>
-              <p className="text-sm text-muted-foreground">Consider widening stops on directional positions</p>
-            </div>
-            <div className="p-4 bg-green-500/5 rounded border border-green-500/20">
-              <p className="font-semibold text-sm mb-2">💡 Hedge</p>
-              <p className="text-sm text-muted-foreground">Allocate to low-beta assets for portfolio protection</p>
-            </div>
+          <CardContent className="space-y-3">
+            {data?.assumptions.map((assumption, index) => (
+              <div key={index} className="p-3 bg-muted/50 rounded border border-border">
+                <p className="text-sm">• {assumption}</p>
+              </div>
+            ))}
           </CardContent>
         </Card>
       </div>
 
-      <Button onClick={runSimulation} className="w-full" size="lg">
-        Run Full Simulation
+      <Button 
+        onClick={() => fetchSimulatorDataFromServer(currentScenario)} 
+        className="w-full" 
+        size="lg"
+        disabled={loading}
+      >
+        {loading ? 'Running...' : 'Refresh Simulation'}
       </Button>
     </div>
   )

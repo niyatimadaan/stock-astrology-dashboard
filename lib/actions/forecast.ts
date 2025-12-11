@@ -92,6 +92,14 @@ async function getForecastDataInternal(
     // Analyze trend (simple linear regression on recent data)
     const trend = analyzeTrend(historicalFlares, historicalVolatility)
 
+    // Calculate decay rate based on most recent data
+    const recentData = stockData.slice(-7)
+    const decayRate = trend === 'rising' ? 0.03 : trend === 'declining' ? -0.08 : -0.05
+    
+    // Get the last known values as starting point
+    const lastFlare = historicalFlares.length > 0 ? historicalFlares[historicalFlares.length - 1] : avgHistoricalFlare
+    const lastVolatility = historicalVolatility.length > 0 ? historicalVolatility[historicalVolatility.length - 1] : avgHistoricalVolatility
+
     // Generate predictions
     const predictions: ForecastPrediction[] = []
     const today = new Date()
@@ -101,15 +109,16 @@ async function getForecastDataInternal(
       forecastDate.setDate(forecastDate.getDate() + i)
       const dateStr = forecastDate.toISOString().split('T')[0]
 
-      // Simple trend-based prediction
-      const trendFactor = trend === 'rising' ? 1.05 : trend === 'declining' ? 0.95 : 1.0
-      const dayFactor = Math.pow(trendFactor, i)
-
-      const predictedFlare = avgHistoricalFlare * dayFactor
-      const predictedVolatility = avgHistoricalVolatility * dayFactor
+      // Use exponential decay/growth model with some randomness for realism
+      const decayFactor = Math.exp(decayRate * i)
+      const randomVariation = 0.95 + Math.random() * 0.1 // 95% to 105% variation
+      
+      // Calculate predictions starting from last known values
+      const predictedFlare = Math.max(0.5, lastFlare * decayFactor * randomVariation)
+      const predictedVolatility = Math.max(1.0, lastVolatility * decayFactor * randomVariation)
 
       // Calculate confidence interval (decreases with forecast distance)
-      const confidenceWidth = 0.2 * i // Wider interval for further predictions
+      const confidenceWidth = 0.15 + (0.05 * i) // Wider interval for further predictions
       const lowerBound = Math.max(0, predictedVolatility * (1 - confidenceWidth))
       const upperBound = predictedVolatility * (1 + confidenceWidth)
 
@@ -128,6 +137,28 @@ async function getForecastDataInternal(
     // Calculate confidence score (decreases with forecast length)
     const confidence = Math.max(0.5, 1 - (forecastDays * 0.05))
 
+    // Generate key predictions based on actual forecast data
+    const volatilityChangePercent = ((avgPredictedVolatility - avgHistoricalVolatility) / avgHistoricalVolatility * 100)
+    const highRiskDays = predictions.filter((p, i) => i >= 5 && p.confidenceInterval[1] - p.confidenceInterval[0] > avgPredictedVolatility * 0.5)
+    
+    const keyPredictions = {
+      volatilityChange: trend === 'declining' 
+        ? `Expect ${Math.abs(volatilityChangePercent).toFixed(0)}% reduction in volatility over next ${Math.min(3, forecastDays)} days`
+        : trend === 'rising'
+        ? `Volatility may increase by ${Math.abs(volatilityChangePercent).toFixed(0)}% over next ${Math.min(3, forecastDays)} days`
+        : `Volatility expected to remain stable around ${avgPredictedVolatility.toFixed(1)}%`,
+      solarActivity: avgPredictedFlare < 2.0
+        ? 'Minor solar flares predicted, unlikely to affect markets'
+        : avgPredictedFlare < 4.0
+        ? 'Moderate solar activity expected, monitor for market impacts'
+        : 'High solar flare activity predicted, potential for increased volatility',
+      riskWindow: highRiskDays.length > 0
+        ? `Day ${highRiskDays[0] ? predictions.indexOf(highRiskDays[0]) + 1 : 6}-${forecastDays} shows increased uncertainty, use caution`
+        : confidence > 0.7
+        ? 'High confidence across all forecast days, predictions reliable'
+        : 'Model confidence decreases after day 5, exercise caution on longer-term predictions'
+    }
+
     const forecastData: ForecastData = {
       forecastDays,
       avgPredictedVolatility,
@@ -135,6 +166,7 @@ async function getForecastDataInternal(
       confidence,
       trend,
       predictions,
+      keyPredictions,
     }
 
     logInfo('Successfully generated forecast data', {

@@ -29,6 +29,7 @@ export default function ForecastDashboard() {
   const fetchForecastDataFromServer = async () => {
     try {
       const result = await getForecastData()
+      console.log("Fetched forecast data:", result)
       
       // Transform predictions into chart data format
       const chartData = result.predictions.map(pred => ({
@@ -244,20 +245,22 @@ export default function ForecastDashboard() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="p-3 bg-blue-500/5 rounded border border-blue-500/20">
-              <p className="font-semibold text-sm">📉 Volatility Decline</p>
+              <p className="font-semibold text-sm">📉 Volatility Trend</p>
               <p className="text-xs text-muted-foreground mt-1">
-                Expect 20-30% reduction in volatility over next 3 days
+                {data?.keyPredictions?.volatilityChange || "Expect 20-30% reduction in volatility over next 3 days"}
               </p>
             </div>
             <div className="p-3 bg-green-500/5 rounded border border-green-500/20">
               <p className="font-semibold text-sm">☀️ Solar Activity</p>
               <p className="text-xs text-muted-foreground mt-1">
-                Minor solar flares predicted, unlikely to affect markets
+                {data?.keyPredictions?.solarActivity || "Minor solar flares predicted, unlikely to affect markets"}
               </p>
             </div>
             <div className="p-3 bg-yellow-500/5 rounded border border-yellow-500/20">
               <p className="font-semibold text-sm">⚡ Risk Window</p>
-              <p className="text-xs text-muted-foreground mt-1">Day 6-7 shows increased uncertainty, use caution</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {data?.keyPredictions?.riskWindow || "Day 6-7 shows increased uncertainty, use caution"}
+              </p>
             </div>
           </CardContent>
         </Card>
